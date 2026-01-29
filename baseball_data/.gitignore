@@ -1,0 +1,4 @@
+.env
+
+# Raw data (Lahman CSV, future retro/statcast, etc.)
+data/

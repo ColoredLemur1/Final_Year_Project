@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+nul
+**/nul 
+# Raw data (Lahman CSV, exports, etc.)
+baseball_data/data/
