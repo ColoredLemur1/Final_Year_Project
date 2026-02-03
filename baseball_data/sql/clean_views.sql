@@ -87,7 +87,9 @@ SELECT DISTINCT ON (game_pk, at_bat_number, pitch_number)
     zone,
     bb_type,
     at_bat_number,
-    pitch_number
+    pitch_number,
+    plate_x,
+    plate_z
 FROM statcast_pitches_2025
 ORDER BY game_pk, at_bat_number, pitch_number, game_date;
 
@@ -129,6 +131,8 @@ SELECT
     s.bb_type,
     s.at_bat_number,
     s.pitch_number,
+    s.plate_x,
+    s.plate_z,
     -- Batter bio (from people via player_map)
     p.nameFirst   AS batter_name_first,
     p.nameLast    AS batter_name_last,

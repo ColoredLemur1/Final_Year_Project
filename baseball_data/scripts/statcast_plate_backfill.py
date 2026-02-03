@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Fetch Statcast pitch-level data for the 2025 regular season in 6-day chunks,
-filter to minimal columns for HR prediction, and append to statcast_pitches_2025.
+Backfill plate_x and plate_z for existing statcast_pitches_2025 rows.
 
-Uses root .env for DB connection (DB_* or PG* vars).
-Run statcast.sql before first run. Execute from baseball_data/: python -m scripts.statcast
+Fetches Statcast data in 6-day chunks for the 2025 season (same as statcast.py),
+filters to regular-season, and UPDATEs existing rows by matching on
+(game_pk, at_bat_number, pitch_number).
+
+Ensures plate_x/plate_z columns exist (ALTER TABLE if needed).
+Uses root .env for DB connection.
+
+Run from baseball_data/: python -m scripts.statcast_plate_backfill
 """
 
 from __future__ import annotations
@@ -13,14 +18,7 @@ import logging
 import os
 import random
 import sys
-
-# Disable tqdm progress bars from pybaseball statcast to keep logs readable
-os.environ["TQDM_DISABLE"] = "1"
-
 import time
-import warnings
-
-warnings.filterwarnings("ignore", message=".*errors='ignore'.*", module="pybaseball.datahelpers.postprocessing")
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -47,16 +45,13 @@ _SEASON_START = "2025-03-27"
 _SEASON_END = "2025-09-29"
 _CHUNK_DAYS = 6
 
-_COLS = [
-    "game_date", "game_year", "game_pk", "game_type", "player_name",
-    "batter", "pitcher", "events", "description",
-    "release_speed", "launch_speed", "launch_angle", "pitch_type", "type",
-    "hit_distance_sc", "stand", "p_throws",
-    "home_team", "away_team", "inning", "inning_topbot",
-    "balls", "strikes", "outs_when_up", "zone", "bb_type",
-    "at_bat_number", "pitch_number",
-    "plate_x", "plate_z",
-]
+# Required columns for matching and update
+_KEY_COLS = ["game_pk", "at_bat_number", "pitch_number"]
+_UPDATE_COLS = ["plate_x", "plate_z"]
+
+os.environ["TQDM_DISABLE"] = "1"
+import warnings
+warnings.filterwarnings("ignore", message=".*errors='ignore'.*", module="pybaseball.datahelpers.postprocessing")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -92,40 +87,51 @@ def _date_range_chunks() -> list[tuple[str, str]]:
     return chunks
 
 
-def _filter_and_trim(df: pd.DataFrame) -> pd.DataFrame:
+def _ensure_columns(engine) -> None:
+    """Add plate_x, plate_z if they don't exist."""
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE statcast_pitches_2025 ADD COLUMN IF NOT EXISTS plate_x REAL"))
+        conn.execute(text("ALTER TABLE statcast_pitches_2025 ADD COLUMN IF NOT EXISTS plate_z REAL"))
+
+
+def _filter_and_extract(df: pd.DataFrame) -> pd.DataFrame:
+    """Filter game_type R and keep only key + update columns."""
     if df is None or df.empty:
         return pd.DataFrame()
-
     if "game_type" in df.columns:
         df = df.loc[df["game_type"] == "R"].copy()
     else:
         df = df.copy()
-
-    if "hit_distance" in df.columns and "hit_distance_sc" not in df.columns:
-        df["hit_distance_sc"] = df["hit_distance"]
-    elif "hit_distance" in df.columns and "hit_distance_sc" in df.columns:
-        df["hit_distance_sc"] = df["hit_distance_sc"].fillna(df["hit_distance"])
-
-    keep = [c for c in _COLS if c in df.columns]
-    df = df[keep].copy()
-
-    # Truncate to schema lengths to avoid StringDataRightTruncation
-    def _trunc(val, w: int):
-        if pd.isna(val):
-            return pd.NA
-        t = str(val).strip()
-        return t[:w] if len(t) > w else t
-
-    for col, width in ({"stand": 1, "p_throws": 1, "type": 1}).items():
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x, w=width: _trunc(x, w))
-
-    for c in _COLS:
+    cols = _KEY_COLS + _UPDATE_COLS
+    available = [c for c in cols if c in df.columns]
+    df = df[available].copy()
+    for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
+    return df[_KEY_COLS + _UPDATE_COLS].dropna(subset=_KEY_COLS, how="all")
 
-    df = df[_COLS]
-    return df
+
+def _update_chunk(engine, df: pd.DataFrame) -> int:
+    """Update statcast_pitches_2025 with plate_x, plate_z from df via temp table."""
+    if df.empty:
+        return 0
+    # Drop rows where both plate_x and plate_z are null (nothing to update)
+    df = df.dropna(subset=_UPDATE_COLS, how="all")
+    if df.empty:
+        return 0
+    with engine.begin() as conn:
+        df.to_sql("_statcast_plate_temp", conn, if_exists="replace", index=False, method="multi", chunksize=5000)
+        result = conn.execute(text("""
+            UPDATE statcast_pitches_2025 s
+            SET plate_x = COALESCE(t.plate_x, s.plate_x),
+                plate_z = COALESCE(t.plate_z, s.plate_z)
+            FROM _statcast_plate_temp t
+            WHERE s.game_pk = t.game_pk
+              AND s.at_bat_number = t.at_bat_number
+              AND s.pitch_number = t.pitch_number
+        """))
+        conn.execute(text("DROP TABLE _statcast_plate_temp"))
+    return result.rowcount if hasattr(result, "rowcount") else 0
 
 
 def main() -> None:
@@ -140,10 +146,13 @@ def main() -> None:
         log.error("Database connection failed: %s", e)
         raise SystemExit(1) from e
 
+    _ensure_columns(engine)
+    log.info("Ensured plate_x, plate_z columns exist")
+
     chunks = _date_range_chunks()
     log.info("Season %s to %s, %d chunks (6-day windows)", _SEASON_START, _SEASON_END, len(chunks))
 
-    total_appended = 0
+    total_updated = 0
     for i, (start_dt, end_dt) in enumerate(chunks):
         log.info("Chunk %d/%d: %s to %s", i + 1, len(chunks), start_dt, end_dt)
         try:
@@ -158,31 +167,23 @@ def main() -> None:
             continue
 
         n_fetched = 0 if raw is None or raw.empty else len(raw)
-        df = _filter_and_trim(raw)
+        df = _filter_and_extract(raw)
         if df.empty:
-            log.info("  Fetched %d rows, 0 regular-season rows to append", n_fetched)
+            log.info("  Fetched %d rows, 0 regular-season rows with plate data to update", n_fetched)
             time.sleep(random.uniform(2, 5))
             continue
 
         try:
-            df.to_sql(
-                "statcast_pitches_2025",
-                engine,
-                if_exists="append",
-                index=False,
-                method="multi",
-                chunksize=5000,
-            )
+            n_updated = _update_chunk(engine, df)
         except SQLAlchemyError as e:
-            log.error("Upload failed for %s–%s: %s", start_dt, end_dt, e)
+            log.error("Update failed for %s–%s: %s", start_dt, end_dt, e)
             raise SystemExit(1) from e
 
-        n_append = len(df)
-        total_appended += n_append
-        log.info("  Fetched %d rows, appended %d (cumulative %d)", n_fetched, n_append, total_appended)
+        total_updated += n_updated
+        log.info("  Fetched %d rows, updated %d with plate_x/plate_z (cumulative %d)", n_fetched, n_updated, total_updated)
         time.sleep(random.uniform(2, 5))
 
-    log.info("Done. Total rows appended: %d", total_appended)
+    log.info("Done. Total rows updated with plate_x/plate_z: %d", total_updated)
 
 
 if __name__ == "__main__":

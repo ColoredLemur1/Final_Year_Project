@@ -31,9 +31,16 @@ CREATE TABLE statcast_pitches_2025 (
     zone            SMALLINT,
     bb_type         VARCHAR(50),
     at_bat_number   SMALLINT,
-    pitch_number    SMALLINT
+    pitch_number    SMALLINT,
+    plate_x         REAL,
+    plate_z         REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_statcast_2025_game ON statcast_pitches_2025 (game_date, game_pk);
 CREATE INDEX IF NOT EXISTS idx_statcast_2025_batter ON statcast_pitches_2025 (batter);
 CREATE INDEX IF NOT EXISTS idx_statcast_2025_pitcher ON statcast_pitches_2025 (pitcher);
+
+-- For existing tables: add plate_x, plate_z without dropping data
+-- Run this if the table already exists and lacks these columns:
+-- ALTER TABLE statcast_pitches_2025 ADD COLUMN IF NOT EXISTS plate_x REAL;
+-- ALTER TABLE statcast_pitches_2025 ADD COLUMN IF NOT EXISTS plate_z REAL;
