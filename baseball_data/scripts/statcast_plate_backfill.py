@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """
-Backfill plate_x and plate_z for existing statcast_pitches_2025 rows.
+Statcast plate backfill: fills plate_x and plate_z for existing 2025 pitch rows.
 
-Fetches Statcast data in 6-day chunks for the 2025 season (same as statcast.py),
-filters to regular-season, and UPDATEs existing rows by matching on
-(game_pk, at_bat_number, pitch_number).
+Fetches Statcast in 6-day chunks and UPDATEs rows by game_pk, at_bat_number, pitch_number. Adds columns if missing.
 
-Ensures plate_x/plate_z columns exist (ALTER TABLE if needed).
-Uses root .env for DB connection.
-
-Run from baseball_data/: python -m scripts.statcast_plate_backfill
+PostgreSQL: set DATABASE_URL or PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
 """
 
 from __future__ import annotations
@@ -67,11 +62,11 @@ def _load_env() -> None:
 
 
 def _db_url() -> str:
-    host = os.getenv("DB_HOST") or os.getenv("PGHOST", "localhost")
-    port = os.getenv("DB_PORT") or os.getenv("PGPORT", "5432")
-    user = os.getenv("DB_USER") or os.getenv("PGUSER", "postgres")
-    password = os.getenv("DB_PASS") or os.getenv("PGPASSWORD", "")
-    dbname = os.getenv("DB_NAME") or os.getenv("PGDATABASE", "baseball")
+    host = os.getenv("PGHOST")
+    port = os.getenv("PGPORT")
+    user = os.getenv("PGUSER")
+    password = os.getenv("PGPASSWORD")
+    dbname = os.getenv("PGDATABASE")
     pw = quote_plus(password) if password else ""
     return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}"
 

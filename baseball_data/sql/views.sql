@@ -1,5 +1,4 @@
--- Lahman views (Step 1)
--- Read-only views for viz and analysis. Build after schema.sql.
+-- Lahman views 
 
 -- vw_player_batting: batting + people, with derived stats (BA, OBP, SLG, OPS)
 CREATE OR REPLACE VIEW vw_player_batting AS

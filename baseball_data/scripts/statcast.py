@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Fetch Statcast pitch-level data for the 2025 regular season in 6-day chunks,
-filter to minimal columns for HR prediction, and append to statcast_pitches_2025.
+Statcast loader: fetches pitch-level data for the 2025 season and appends to the database.
 
-Uses root .env for DB connection (DB_* or PG* vars).
-Run statcast.sql before first run. Execute from baseball_data/: python -m scripts.statcast
+Pulls data in 6-day chunks, keeps minimal columns for HR prediction. Run statcast.sql once before first use.
+
+PostgreSQL: set DATABASE_URL or PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
 """
 
 from __future__ import annotations
@@ -56,6 +56,7 @@ _COLS = [
     "balls", "strikes", "outs_when_up", "zone", "bb_type",
     "at_bat_number", "pitch_number",
     "plate_x", "plate_z",
+    "release_spin_rate",
 ]
 
 logging.basicConfig(
@@ -72,11 +73,11 @@ def _load_env() -> None:
 
 
 def _db_url() -> str:
-    host = os.getenv("DB_HOST") or os.getenv("PGHOST", "localhost")
-    port = os.getenv("DB_PORT") or os.getenv("PGPORT", "5432")
-    user = os.getenv("DB_USER") or os.getenv("PGUSER", "postgres")
-    password = os.getenv("DB_PASS") or os.getenv("PGPASSWORD", "")
-    dbname = os.getenv("DB_NAME") or os.getenv("PGDATABASE", "baseball")
+    host = os.getenv("PGHOST")
+    port = os.getenv("PGPORT")
+    user = os.getenv("PGUSER")
+    password = os.getenv("PGPASSWORD")
+    dbname = os.getenv("PGDATABASE")
     pw = quote_plus(password) if password else ""
     return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}"
 

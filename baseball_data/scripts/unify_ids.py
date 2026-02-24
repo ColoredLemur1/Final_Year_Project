@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Unify player IDs across Statcast (MLBAM), Lahman (bbref), and Retrosheet using
-the Chadwick Register. Uploads a player_map table and creates v_master_player_list.
+Unify IDs: builds a player map from the Chadwick Register and uploads it to PostgreSQL.
 
-Uses root .env for DB connection (DB_* or PG* vars).
-Run from baseball_data/: python -m scripts.unify_ids
+Maps Statcast (MLBAM), Lahman (bbref), and Retrosheet IDs. Creates v_master_player_list.
+
+PostgreSQL: set DATABASE_URL or PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
 """
 
 from __future__ import annotations
@@ -46,11 +46,11 @@ def _load_env() -> None:
 
 
 def _db_url() -> str:
-    host = os.getenv("DB_HOST") or os.getenv("PGHOST", "localhost")
-    port = os.getenv("DB_PORT") or os.getenv("PGPORT", "5432")
-    user = os.getenv("DB_USER") or os.getenv("PGUSER", "postgres")
-    password = os.getenv("DB_PASS") or os.getenv("PGPASSWORD", "")
-    dbname = os.getenv("DB_NAME") or os.getenv("PGDATABASE", "baseball")
+    host = os.getenv("PGHOST")
+    port = os.getenv("PGPORT")
+    user = os.getenv("PGUSER")
+    password = os.getenv("PGPASSWORD")
+    dbname = os.getenv("PGDATABASE")
     pw = quote_plus(password) if password else ""
     return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}"
 

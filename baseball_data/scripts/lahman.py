@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
 """
-Lahman loader: migrate Lahman CSV data into PostgreSQL.
+Lahman loader: migrates the Lahman CSV files into the PostgreSQL database.
 
-Reads People.csv, Teams.csv, Batting.csv, Pitching.csv, Fielding.csv from
-data/ (default: data/lahman_1871-2025_csv), truncates people/teams (CASCADE),
-then loads in dependency order.
+Reads People.csv, Teams.csv, Batting.csv, Pitching.csv, Fielding.csv from data
 
 PostgreSQL: set DATABASE_URL or PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
-Uses python-dotenv to load .env from baseball_data/ or project root.
-
-Usage:
-  python -m scripts.lahman [--data-dir DIR]
-  python scripts/lahman.py [--data-dir DIR]
 """
 
 from __future__ import annotations
@@ -48,16 +41,16 @@ _REV_ALIAS = {"X2B": "2B", "X3B": "3B"}
 _QUOTED_COLS = {"rank", "X2B", "X3B"}  # rank: reserved word, stored lowercase
 
 
-def _norm(s: str) -> str:
+def _norm(s):
     return (s or "").strip()
 
 
-def _empty_to_none(s: str) -> str | None:
+def _empty_to_none(s):
     t = _norm(s)
     return None if t == "" else t
 
 
-def _int_or_none(s: str) -> int | None:
+def _int_or_none(s):
     t = _empty_to_none(s)
     if t is None:
         return None
@@ -67,7 +60,7 @@ def _int_or_none(s: str) -> int | None:
         return None
 
 
-def _float_or_none(s: str) -> float | None:
+def _float_or_none(s):
     t = _empty_to_none(s)
     if t is None:
         return None
@@ -77,13 +70,13 @@ def _float_or_none(s: str) -> float | None:
         return None
 
 
-def _cap_float(v: float | None, lo: float, hi: float) -> float | None:
+def _cap_float(v: float | None, lo: float, hi: float):
     if v is None:
         return None
     return max(lo, min(hi, float(v)))
 
 
-def _date_or_none(s: str) -> date | None:
+def _date_or_none(s):
     t = _empty_to_none(s)
     if t is None:
         return None
@@ -95,7 +88,7 @@ def _date_or_none(s: str) -> date | None:
     return None
 
 
-def _get(row: dict[str, str], key: str, conv: Callable[[str], Any] = _empty_to_none) -> Any:
+def _get(row, key, conv: Callable[[str], Any] = _empty_to_none):
     v = row.get(key)
     if v is None and key in _REV_ALIAS:
         v = row.get(_REV_ALIAS[key])
@@ -107,7 +100,7 @@ def _get(row: dict[str, str], key: str, conv: Callable[[str], Any] = _empty_to_n
 
 
 
-def _people_rows(path: Path) -> Iterator[tuple[Any, ...]]:
+def _people_rows(path: Path):
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
         r = csv.DictReader(f)
         for row in r:
@@ -139,7 +132,7 @@ def _people_rows(path: Path) -> Iterator[tuple[Any, ...]]:
             )
 
 
-def _teams_rows(path: Path) -> Iterator[tuple[Any, ...]]:
+def _teams_rows(path: Path):
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
         r = csv.DictReader(f)
         for row in r:
@@ -199,7 +192,7 @@ def _teams_rows(path: Path) -> Iterator[tuple[Any, ...]]:
             )
 
 
-def _batting_rows(path: Path) -> Iterator[tuple[Any, ...]]:
+def _batting_rows(path: Path):
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
         r = csv.DictReader(f)
         for row in r:
@@ -231,7 +224,7 @@ def _batting_rows(path: Path) -> Iterator[tuple[Any, ...]]:
             )
 
 
-def _pitching_rows(path: Path) -> Iterator[tuple[Any, ...]]:
+def _pitching_rows(path: Path):
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
         r = csv.DictReader(f)
         for row in r:
@@ -271,7 +264,7 @@ def _pitching_rows(path: Path) -> Iterator[tuple[Any, ...]]:
             )
 
 
-def _fielding_rows(path: Path) -> Iterator[tuple[Any, ...]]:
+def _fielding_rows(path: Path):
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
         r = csv.DictReader(f)
         for row in r:
@@ -305,22 +298,22 @@ def _pg_conn():
     if url:
         return psycopg2.connect(url)
     return psycopg2.connect(
-        host=os.getenv("PGHOST", "localhost"),
-        port=os.getenv("PGPORT", "5432"),
-        user=os.getenv("PGUSER", "postgres"),
-        password=os.getenv("PGPASSWORD", ""),
-        dbname=os.getenv("PGDATABASE", "baseball"),
+        host=os.getenv("PGHOST"),
+        port=os.getenv("PGPORT"),
+        user=os.getenv("PGUSER"),
+        password=os.getenv("PGPASSWORD"),
+        dbname=os.getenv("PGDATABASE"),
     )
 
 
-def _truncate(conn) -> None:
+def _truncate(conn):
     cur = conn.cursor()
     cur.execute(sql.SQL("TRUNCATE TABLE people, teams CASCADE"))
     conn.commit()
     cur.close()
 
 
-def _csv_path(data_dir: Path, name: str) -> Path | None:
+def _csv_path(data_dir: Path, name: str):
     candidates = [data_dir / f"{name}.csv"]
     if name == "people":
         candidates.append(data_dir / "Master.csv")
@@ -330,7 +323,7 @@ def _csv_path(data_dir: Path, name: str) -> Path | None:
     return None
 
 
-def _insert_batch(cur, table: str, cols: list[str], rows: list[tuple[Any, ...]]) -> None:
+def _insert_batch(cur, table: str, cols: list[str], rows: list[tuple[Any, ...]]):
     if not rows:
         return
     placeholders = ",".join(["%s"] * len(cols))
@@ -369,7 +362,7 @@ _TABLES = [
 ]
 
 
-def _load(conn, data_dir: Path) -> dict[str, int]:
+def _load(conn, data_dir: Path):
     counts: dict[str, int] = {}
     cur = conn.cursor()
     _truncate(conn)
@@ -399,7 +392,7 @@ def _load(conn, data_dir: Path) -> dict[str, int]:
     return counts
 
 
-def main() -> None:
+def main():
     ap = argparse.ArgumentParser(description="Load Lahman CSV into PostgreSQL")
     ap.add_argument("--data-dir", type=Path, default=_DEFAULT_DATA_DIR, help="Directory containing Lahman CSV files")
     args = ap.parse_args()
