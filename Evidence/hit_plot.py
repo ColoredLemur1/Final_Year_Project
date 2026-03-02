@@ -18,12 +18,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-try:
-    from dotenv import load_dotenv
-    from sqlalchemy import create_engine
-except ImportError as e:
-    print(f"Missing dependency: {e}. Install with: pip install pandas seaborn matplotlib sqlalchemy python-dotenv", file=sys.stderr)
-    raise SystemExit(1) from e
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
 
 _EVIDENCE_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _EVIDENCE_DIR.parent

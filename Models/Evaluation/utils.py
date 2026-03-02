@@ -338,3 +338,178 @@ def get_engine():
     load_dotenv(_PROJECT_ROOT / ".env")
     load_dotenv(_EVAL_DIR / ".env")
     return create_engine(_db_url())
+
+
+# ---------------------------------------------------------------------------
+# Batter model and game sim (Phase 5)
+# ---------------------------------------------------------------------------
+def load_batter_models() -> dict:
+    """Load batter pitch_result classifier and encoders. Same pattern as load_models_and_encoders."""
+    sys.path.insert(0, str(_PROJECT_ROOT / "Models" / "Training"))
+    from data_prep_batters import load_batter_encoders, encode_batter_row
+
+    _saved = _PROJECT_ROOT / "Models" / "Training" / "saved_models"
+    encoders = load_batter_encoders(_saved / "batter_encoders.json")
+    if encoders is None:
+        encoders = load_batter_encoders(_MODELS_DIR / "batter_encoders.json")
+    if encoders is None:
+        raise FileNotFoundError("batter_encoders.json not found")
+    clf = xgb.XGBClassifier()
+    p = _saved / "batter_pitch_result.json"
+    if not p.exists():
+        p = _MODELS_DIR / "batter_pitch_result.json"
+    clf.load_model(str(p))
+    return {
+        "clf": clf,
+        "encoders": encoders,
+        "feats_batter": encoders["feats_batter"],
+        "result_to_idx": encoders["result_to_idx"],
+        "idx_to_result": {int(k): v for k, v in encoders["idx_to_result"].items()},
+        "encode_batter_row": encode_batter_row,
+    }
+
+
+def predict_pitch_result(batter_models: dict, pitch: dict, context: dict, sample: bool = True) -> str | tuple[str, np.ndarray]:
+    """
+    Predict pitch_result from one pitch + context.
+    pitch: {pitch_type, plate_x, plate_z, release_speed, release_spin_rate}
+    context: {balls, strikes, stand, p_throws, batter, career_*, home_team, ...}
+    If sample=True, returns sampled class (str). If sample=False, returns (class, proba array).
+    """
+    enc = batter_models["encoders"]
+    X = batter_models["encode_batter_row"](pitch, context, enc)
+    feats = batter_models["feats_batter"]
+    proba = np.asarray(batter_models["clf"].predict_proba(X[feats])).ravel()
+    idx_to_result = batter_models["idx_to_result"]
+    n = len(proba)
+    if n < len(idx_to_result):
+        proba = np.resize(proba, len(idx_to_result))
+        proba[n:] = 0
+        proba = proba / proba.sum()
+    if sample:
+        pred_idx = int(np.random.choice(len(proba), p=proba))
+        return idx_to_result.get(pred_idx, "ball")
+    pred_idx = int(np.argmax(proba))
+    return idx_to_result.get(pred_idx, "ball"), proba
+
+
+def update_game_state(state: dict, pitch_result: str) -> dict:
+    """
+    Update game state after one pitch. state: balls, strikes, outs, bases (list 0-2 for 1st,2nd,3rd), runs, inning.
+    Returns new state. Caller should check for walk (balls==4), strikeout (strikes==3), HBP, or in_play_* to advance runners.
+    """
+    s = state.copy()
+    s["balls"] = state["balls"]
+    s["strikes"] = state["strikes"]
+    s["outs"] = state["outs"]
+    s["bases"] = list(state.get("bases", [0, 0, 0]))
+    s["runs"] = state.get("runs", 0)
+
+    if pitch_result == "ball":
+        s["balls"] = state["balls"] + 1
+        if s["balls"] >= 4:
+            s["balls"], s["strikes"] = 0, 0
+            # Walk: batter to first, advance forced
+            b = s["bases"]
+            if b[0]: b[1], b[0] = b[1] or b[0], 1
+            else: b[0] = 1
+            s["bases"] = b
+    elif pitch_result in ("called_strike", "swinging_strike"):
+        s["strikes"] = state["strikes"] + 1
+        if s["strikes"] >= 3:
+            s["balls"], s["strikes"] = 0, 0
+            s["outs"] = state["outs"] + 1
+    elif pitch_result == "foul":
+        s["strikes"] = min(2, state["strikes"] + 1)
+    elif pitch_result == "hit_by_pitch":
+        s["balls"], s["strikes"] = 0, 0
+        b = s["bases"]
+        if b[0]: b[1], b[0] = b[1] or b[0], 1
+        else: b[0] = 1
+        s["bases"] = b
+    elif pitch_result == "in_play_out":
+        s["balls"], s["strikes"] = 0, 0
+        s["outs"] = state["outs"] + 1
+    elif pitch_result == "in_play_1b":
+        s["balls"], s["strikes"] = 0, 0
+        b = s["bases"]
+        s["runs"] += b[2]
+        s["bases"] = [1, b[0], b[1]]
+    elif pitch_result == "in_play_2b":
+        s["balls"], s["strikes"] = 0, 0
+        b = s["bases"]
+        s["runs"] += b[1] + b[2]
+        s["bases"] = [0, 1, b[0]]
+    elif pitch_result == "in_play_3b":
+        s["balls"], s["strikes"] = 0, 0
+        b = s["bases"]
+        s["runs"] += b[0] + b[1] + b[2]
+        s["bases"] = [0, 0, 1]
+    elif pitch_result == "in_play_hr":
+        s["balls"], s["strikes"] = 0, 0
+        b = s["bases"]
+        s["runs"] += 1 + b[0] + b[1] + b[2]
+        s["bases"] = [0, 0, 0]
+    return s
+
+
+def simulate_at_bat_step(
+    pitcher_models: dict,
+    batter_models: dict,
+    context: dict,
+    batter_id: int,
+    batter_career: dict,
+    home_team: str,
+    state: dict,
+) -> tuple[dict, str, dict]:
+    """
+    One at-bat step: pitcher throws one pitch, batter model predicts outcome.
+    context: pitcher context (pitcher, p_throws, stand, balls, strikes, ...) for predict_pitch.
+    Returns (pitch_dict, pitch_result, new_state). new_state is updated after this pitch.
+    """
+    pitch = predict_pitch(pitcher_models, context)
+    batter_ctx = {
+        "balls": context.get("balls", 0),
+        "strikes": context.get("strikes", 0),
+        "stand": context.get("stand", "R"),
+        "p_throws": context.get("p_throws", "R"),
+        "batter": batter_id,
+        "home_team": home_team,
+        **batter_career,
+    }
+    result = predict_pitch_result(batter_models, pitch, batter_ctx, sample=True)
+    new_state = update_game_state(state, result)
+    return pitch, result, new_state
+
+
+def simulate_half_inning(
+    pitcher_models: dict,
+    batter_models: dict,
+    pitcher_context: dict,
+    batting_order: list[tuple[int, dict]],
+    home_team: str,
+    max_pitches_per_batter: int = 20,
+) -> tuple[int, list[dict]]:
+    """
+    Simulate half-inning until 3 outs. batting_order: list of (batter_id, batter_career).
+    Returns (runs_scored, list of pitch/outcome logs for 2D viz).
+    """
+    state = {"balls": 0, "strikes": 0, "outs": 0, "bases": [0, 0, 0], "runs": 0}
+    logs = []
+    order_index = 0
+    while state["outs"] < 3:
+        batter_id, batter_career = batting_order[order_index % len(batting_order)]
+        context = {**pitcher_context, "balls": state["balls"], "strikes": state["strikes"]}
+        pitches_this_ab = 0
+        while state["outs"] < 3 and pitches_this_ab < max_pitches_per_batter:
+            pitch, result, state = simulate_at_bat_step(
+                pitcher_models, batter_models, context, batter_id, batter_career, home_team, state
+            )
+            logs.append({"pitch": pitch, "result": result, "state_after": state.copy()})
+            context["balls"], context["strikes"] = state["balls"], state["strikes"]
+            pitches_this_ab += 1
+            # PA ends on walk (4 balls), strikeout (3 strikes), HBP, or in_play (state resets balls/strikes to 0)
+            if state["balls"] == 0 and state["strikes"] == 0:
+                break
+        order_index += 1
+    return state["runs"], logs

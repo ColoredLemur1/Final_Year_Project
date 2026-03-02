@@ -18,14 +18,10 @@ from urllib.parse import quote_plus
 
 import pandas as pd
 
-try:
-    from dotenv import load_dotenv
-    from pybaseball import chadwick_register
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.exc import SQLAlchemyError
-except ImportError as e:
-    print(f"Missing dependency: {e}. Install with: pip install pybaseball pandas sqlalchemy python-dotenv", file=sys.stderr)
-    raise SystemExit(1) from e
+from dotenv import load_dotenv
+from pybaseball import chadwick_register
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 
 _BASE = Path(__file__).resolve().parent.parent

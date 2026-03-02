@@ -1,0 +1,143 @@
+{
+  "feats_batter": [
+    "pitch_type",
+    "plate_x",
+    "plate_z",
+    "release_speed",
+    "release_spin_rate",
+    "balls",
+    "strikes",
+    "stand",
+    "p_throws",
+    "batter",
+    "career_AB",
+    "career_H",
+    "career_HR",
+    "career_BA",
+    "career_OBP",
+    "career_SLG",
+    "home_team",
+    "inning",
+    "outs_when_up",
+    "is_pitcher_count",
+    "is_batter_count",
+    "pitcher",
+    "previous_pitch_type",
+    "previous_was_strike",
+    "in_zone",
+    "is_fastball",
+    "game_year"
+  ],
+  "result_to_idx": {
+    "in_play_out": 0,
+    "strikeout": 1,
+    "free_pass": 2,
+    "single": 3,
+    "extra_base": 4
+  },
+  "idx_to_result": {
+    "0": "in_play_out",
+    "1": "strikeout",
+    "2": "free_pass",
+    "3": "single",
+    "4": "extra_base"
+  },
+  "cat_encodings": {
+    "pitch_type": [
+      "CH",
+      "CS",
+      "CU",
+      "EP",
+      "FA",
+      "FC",
+      "FF",
+      "FO",
+      "FS",
+      "KC",
+      "PO",
+      "SC",
+      "SI",
+      "SL",
+      "ST",
+      "SV",
+      "UN"
+    ],
+    "stand": [
+      "L",
+      "R"
+    ],
+    "p_throws": [
+      "L",
+      "R"
+    ],
+    "home_team": [
+      "ATH",
+      "ATL",
+      "AZ",
+      "BAL",
+      "BOS",
+      "CHC",
+      "CIN",
+      "CLE",
+      "COL",
+      "CWS",
+      "DET",
+      "HOU",
+      "KC",
+      "LAA",
+      "LAD",
+      "MIA",
+      "MIL",
+      "MIN",
+      "NYM",
+      "NYY",
+      "PHI",
+      "PIT",
+      "SD",
+      "SEA",
+      "SF",
+      "STL",
+      "TB",
+      "TEX",
+      "TOR",
+      "WSH"
+    ],
+    "previous_pitch_type": [
+      "CH",
+      "CS",
+      "CU",
+      "EP",
+      "FA",
+      "FC",
+      "FF",
+      "FO",
+      "FS",
+      "KC",
+      "KN",
+      "PO",
+      "SC",
+      "SI",
+      "SL",
+      "ST",
+      "SV",
+      "UN",
+      "__NA__"
+    ]
+  },
+  "pitch_result_classes": [
+    "in_play_out",
+    "strikeout",
+    "free_pass",
+    "single",
+    "extra_base"
+  ],
+  "threshold_weak": 0.02,
+  "weak_class_indices": [
+    3,
+    4
+  ],
+  "threshold_per_weak_class": [
+    0.02,
+    0.02
+  ]
+}

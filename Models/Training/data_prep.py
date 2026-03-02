@@ -20,20 +20,9 @@ from urllib.parse import quote_plus
 
 import pandas as pd
 
-try:
-    from dotenv import load_dotenv
-    from sqlalchemy import create_engine
-except ImportError as e:
-    print(
-        f"Missing dependency: {e}. Install with: pip install pandas sqlalchemy python-dotenv",
-        file=sys.stderr,
-    )
-    raise SystemExit(1) from e
-
-try:
-    from sklearn.preprocessing import LabelEncoder
-except ImportError:
-    LabelEncoder = None  # type: ignore[misc, assignment]
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sklearn.preprocessing import LabelEncoder
 
 _BASE = Path(__file__).resolve().parent
 _PROJECT_ROOT = _BASE.parent.parent
@@ -297,12 +286,8 @@ def _encode_pitcher_categoricals(df: pd.DataFrame) -> pd.DataFrame:
         s = df[col].fillna("__NA__").astype(str).str.strip()
         if s.str.len().eq(0).any():
             s = s.replace("", "__NA__")
-        if LabelEncoder is not None:
-            le = LabelEncoder()
-            df[col] = le.fit_transform(s)
-        else:
-            uniq = s.unique().tolist()
-            df[col] = s.map(lambda x: uniq.index(x) if x in uniq else 0)
+        le = LabelEncoder()
+        df[col] = le.fit_transform(s)
 
     for col in ("pitcher",):
         if col in df.columns:
@@ -346,14 +331,9 @@ def fit_and_save_pitcher_encoders(engine, out_path: str | Path) -> None:
         s = X[col].fillna("__NA__").astype(str).str.strip()
         if s.str.len().eq(0).any():
             s = s.replace("", "__NA__")
-        if LabelEncoder is not None:
-            le = LabelEncoder()
-            X[col] = le.fit_transform(s)
-            cat_encodings[col] = le.classes_.tolist()
-        else:
-            uniq = s.unique().tolist()
-            cat_encodings[col] = sorted(set(uniq))
-            X[col] = s.map(lambda x: uniq.index(x) if x in uniq else 0)
+        le = LabelEncoder()
+        X[col] = le.fit_transform(s)
+        cat_encodings[col] = le.classes_.tolist()
 
     for col in ("pitcher",):
         if col in X.columns:
@@ -579,12 +559,8 @@ def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
         s = df[col].fillna("__NA__").astype(str).str.strip()
         if s.str.len().eq(0).any():
             s = s.replace("", "__NA__")
-        if LabelEncoder is not None:
-            le = LabelEncoder()
-            df[col] = le.fit_transform(s)
-        else:
-            uniq = s.unique().tolist()
-            df[col] = s.map(lambda x: uniq.index(x) if x in uniq else 0)
+        le = LabelEncoder()
+        df[col] = le.fit_transform(s)
 
     # batter / pitcher: keep as int (MLBAM IDs can be large but valid); fill NaN with -1
     for col in ("batter", "pitcher"):

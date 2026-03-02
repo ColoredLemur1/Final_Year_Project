@@ -18,13 +18,9 @@ import sys
 from pathlib import Path
 from urllib.parse import quote_plus
 
-try:
-    from dotenv import load_dotenv
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.exc import SQLAlchemyError
-except ImportError as e:
-    print(f"Missing dependency: {e}. Install with: pip install sqlalchemy python-dotenv", file=sys.stderr)
-    raise SystemExit(1) from e
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 _BASE = Path(__file__).resolve().parent.parent
 _PROJECT_ROOT = _BASE.parent

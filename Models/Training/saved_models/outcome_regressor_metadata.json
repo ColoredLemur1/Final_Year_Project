@@ -1,0 +1,25 @@
+{
+  "feature_cols": [
+    "pitch_mph",
+    "plate_x",
+    "plate_z",
+    "batter_power",
+    "outcome_0",
+    "outcome_1",
+    "outcome_2",
+    "outcome_3",
+    "outcome_4"
+  ],
+  "target_names": [
+    "launch_speed",
+    "launch_angle"
+  ],
+  "n_outcomes": 5,
+  "outcome_names": [
+    "in_play_out",
+    "strikeout",
+    "free_pass",
+    "single",
+    "extra_base"
+  ]
+}

@@ -27,18 +27,11 @@ from urllib.parse import quote_plus
 
 import pandas as pd
 
-try:
-    from dotenv import load_dotenv
-    from pybaseball import statcast
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.exc import SQLAlchemyError
-    try:
-        from pybaseball.statcast import StatcastException
-    except ImportError:
-        StatcastException = Exception
-except ImportError as e:
-    print(f"Missing dependency: {e}. Install with: pip install pybaseball pandas sqlalchemy python-dotenv", file=sys.stderr)
-    raise SystemExit(1) from e
+from dotenv import load_dotenv
+from pybaseball import statcast
+from pybaseball.statcast import StatcastException
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 _BASE = Path(__file__).resolve().parent.parent
 _PROJECT_ROOT = _BASE.parent

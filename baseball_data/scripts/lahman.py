@@ -17,19 +17,13 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-try:
-    import psycopg2
-    from psycopg2 import sql
-except ImportError:
-    psycopg2 = None  # type: ignore[assignment]
+import psycopg2
+from psycopg2 import sql
+from dotenv import load_dotenv
 
-try:
-    from dotenv import load_dotenv
-    _base = Path(__file__).resolve().parent.parent
-    load_dotenv(_base / ".env")
-    load_dotenv(_base.parent / ".env")
-except Exception:
-    pass
+_base = Path(__file__).resolve().parent.parent
+load_dotenv(_base / ".env")
+load_dotenv(_base.parent / ".env")
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 _DEFAULT_DATA_DIR = _BASE_DIR / "data" / "lahman_1871-2025_csv"
@@ -396,10 +390,6 @@ def main():
     ap = argparse.ArgumentParser(description="Load Lahman CSV into PostgreSQL")
     ap.add_argument("--data-dir", type=Path, default=_DEFAULT_DATA_DIR, help="Directory containing Lahman CSV files")
     args = ap.parse_args()
-
-    if not psycopg2:
-        raise SystemExit("psycopg2 required. Run: pip install psycopg2-binary")
-
     data_dir = args.data_dir
     if not data_dir.is_dir():
         raise SystemExit(f"Data dir not found: {data_dir}")

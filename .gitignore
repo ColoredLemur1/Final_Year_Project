@@ -7,3 +7,8 @@ nul
 # Raw data (Lahman CSV, exports, etc.)
 baseball_data/data/
 latex.tex
+Models/Training/saved_models/*.joblib
+Models/saved_models/*.joblib
+Models/Evaluation/saved_models/*.joblib
+Models/Training/saved_models/batter_pitch_result.json
+Models/Evaluation/saved_models/batter_pitch_result.json
