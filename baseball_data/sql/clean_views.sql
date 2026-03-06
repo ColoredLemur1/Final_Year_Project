@@ -100,7 +100,9 @@ ORDER BY game_pk, at_bat_number, pitch_number, game_date;
 --------------------------------------------------------------------------------
 
 -- clean_statcast_with_batter: Statcast pitches joined to batter bio + career batting stats
--- Uses LEFT JOINs so pitches with unmapped batters are retained (with NULL Lahman fields)
+-- Uses LEFT JOINs so pitches with unmapped batters are retained (with NULL Lahman fields).
+-- Required for batter pitch-result / in-play labels: events (PA outcome on last pitch),
+-- description (pitch-level result text), type (B/S/X). Populated by statcast.py loader.
 CREATE OR REPLACE VIEW clean_statcast_with_batter AS
 SELECT
     -- Statcast pitch data

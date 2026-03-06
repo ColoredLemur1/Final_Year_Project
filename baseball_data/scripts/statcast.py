@@ -2,7 +2,12 @@
 """
 Statcast loader: fetches pitch-level data for the 2025 season and appends to the database.
 
-Pulls data in 6-day chunks, keeps minimal columns for HR prediction. Run statcast.sql once before first use.
+Pulls data in 6-day chunks, keeps minimal columns for HR prediction and batter outcome
+modeling. Run statcast.sql once before first use.
+
+Required for in-play labels (pitch_result, immediate_event, in_play_outcome): events,
+description, type. Statcast provides these; _normalize_statcast_columns maps alternate
+names (e.g. des, Type, Events) to our schema so they are preserved.
 
 PostgreSQL: set DATABASE_URL or PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
 """
@@ -86,9 +91,40 @@ def _date_range_chunks() -> list[tuple[str, str]]:
     return chunks
 
 
+def _normalize_statcast_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Map Statcast/pybaseball column names to our schema so events, description, type
+    are preserved for pitch-result and in-play labels. Statcast provides these;
+    the API or pybaseball may return different names (e.g. des, Type, Events).
+    """
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    # Normalize case: some sources return Type, Events, Description
+    for alt, canonical in [("Type", "type"), ("Events", "events"), ("Description", "description")]:
+        if alt in df.columns and canonical not in df.columns:
+            df[canonical] = df[alt]
+        elif alt in df.columns and canonical in df.columns:
+            df[canonical] = df[canonical].fillna(df[alt])
+    # Baseball Savant / pybaseball: "des" = plate appearance description; "description" = pitch result.
+    # Use "des" as fallback for "description" so we don't lose pitch-level outcome text.
+    if "des" in df.columns and "description" not in df.columns:
+        df["description"] = df["des"]
+    elif "des" in df.columns and "description" in df.columns:
+        df["description"] = df["description"].fillna(df["des"])
+    # Some Statcast exports use spin_rate; we store as release_spin_rate.
+    if "spin_rate" in df.columns and "release_spin_rate" not in df.columns:
+        df["release_spin_rate"] = df["spin_rate"]
+    elif "spin_rate" in df.columns and "release_spin_rate" in df.columns:
+        df["release_spin_rate"] = df["release_spin_rate"].fillna(df["spin_rate"])
+    return df
+
+
 def _filter_and_trim(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
+
+    df = _normalize_statcast_columns(df)
 
     if "game_type" in df.columns:
         df = df.loc[df["game_type"] == "R"].copy()
@@ -173,6 +209,12 @@ def main() -> None:
 
         n_append = len(df)
         total_appended += n_append
+        # Warn if events/description/type are mostly null (needed for batter in-play labels)
+        for col in ("events", "description", "type"):
+            if col in df.columns:
+                pct = df[col].notna().mean() * 100
+                if pct < 10 and n_append > 100:
+                    log.warning("  %s is %.1f%% non-null; batter pitch-result/in-play labels may be missing", col, pct)
         log.info("  Fetched %d rows, appended %d (cumulative %d)", n_fetched, n_append, total_appended)
         time.sleep(random.uniform(2, 5))
 

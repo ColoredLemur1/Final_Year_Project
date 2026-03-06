@@ -223,6 +223,15 @@ _PITCHER_SIM_CAREER_COLS = [
 ]
 _PITCHER_SIM_TARGETS = ["pitch_type", "plate_x", "plate_z", "release_speed", "release_spin_rate"]
 
+# Deciding counts (3-2, 0-2, 1-2, 2-2, 3-1) for count-aware weighting in pitcher training.
+# Kept in sync with data_prep_batters.is_deciding_count / DECIDING_COUNTS.
+DECIDING_COUNTS = {(0, 2), (1, 2), (2, 2), (3, 1), (3, 2)}
+
+
+def is_deciding_count(balls: int, strikes: int) -> bool:
+    """True if (balls, strikes) is a deciding count (pitcher ahead or full count)."""
+    return (int(balls), int(strikes)) in DECIDING_COUNTS
+
 
 def load_pitcher_simulator_data(engine) -> pd.DataFrame:
     """
