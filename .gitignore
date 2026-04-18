@@ -9,3 +9,5 @@ baseball_data/data/
 latex.tex
 Models/saved_models/*
 Models/Training/saved_models/*
+# Local report drafts (not for version control)
+report/
