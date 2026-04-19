@@ -1,9 +1,12 @@
-streamlit
-pandas
-xgboost
-sqlalchemy
-psycopg2-binary
-python-dotenv
-matplotlib
-numpy
-plotly
+# web_app/: Streamlit app (imports Models/Evaluation/utils — needs same ML stack as Models)
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+xgboost>=2.0.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+python-dotenv>=1.0.0
+matplotlib>=3.7.0
+plotly>=5.18.0

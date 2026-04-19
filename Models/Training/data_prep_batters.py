@@ -4,7 +4,7 @@ Batter simulator data prep: pitch-level data with pitch_result target.
 
 Loads from clean_statcast_with_batter; maps events/description/type to pitch_result;
 builds batter feature matrix (pitch, count, matchup, batter career, park);
-train/val/test split (time-based or random).
+train/val/test split (temporal forward-chaining by default, or random).
 
 PostgreSQL: set PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE (or .env).
 """
@@ -21,6 +21,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sklearn.preprocessing import LabelEncoder
+
+from temporal_split import temporal_train_val_test
 
 _BASE = Path(__file__).resolve().parent
 _PROJECT_ROOT = _BASE.parent.parent
@@ -591,24 +593,29 @@ def prepare_batter_features(
 
 def train_val_test_split(
     df: pd.DataFrame,
-    train_frac: float = 0.8,
-    val_frac: float = 0.1,
+    train_frac: float = 0.7,
+    val_frac: float = 0.15,
     random_state: int = 42,
-    time_based: bool = False,
+    time_based: bool = True,
     date_col: str = "game_date",
+    year_col: str = "game_year",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Split into train/val/test. If time_based and date_col present, split by date quantiles;
-    else random stratify by target_class (if present) or pitch_result when feasible.
+    Split into train/val/test.
+
+    time_based=True (default): chronological split via temporal_train_val_test (by season when
+    multiple years exist, else by game_date order).
+
+    time_based=False: random stratified split on target_class if present, else pitch_result.
     Returns (train_df, val_df, test_df).
     """
     n = len(df)
     stratify_col = df["target_class"] if "target_class" in df.columns and df["target_class"].notna().all() else df.get("pitch_result")
-    if time_based and date_col in df.columns:
-        df = df.sort_values(date_col).reset_index(drop=True)
-        t1 = int(n * train_frac)
-        t2 = int(n * (train_frac + val_frac))
-        return df.iloc[:t1], df.iloc[t1:t2], df.iloc[t2:]
+    if time_based and (date_col in df.columns or year_col in df.columns):
+        train_df, val_df, test_df, _meta = temporal_train_val_test(
+            df, date_col=date_col, year_col=year_col, train_frac=train_frac, val_frac=val_frac
+        )
+        return train_df, val_df, test_df
     from sklearn.model_selection import train_test_split
     try:
         train_df, rest = train_test_split(
@@ -629,9 +636,9 @@ def train_val_test_split(
 
 def load_and_prepare_batter(
     engine,
-    time_based: bool = False,
-    train_frac: float = 0.8,
-    val_frac: float = 0.1,
+    time_based: bool = True,
+    train_frac: float = 0.7,
+    val_frac: float = 0.15,
     random_state: int = 42,
     use_pitch_result_target: bool = False,
     use_immediate_outcomes_only: bool = False,
@@ -640,7 +647,8 @@ def load_and_prepare_batter(
     """
     Load batter data, build pitch_result, split, prepare features.
     Returns (X_train, y_train, X_val, y_val, X_test, y_test, cat_encodings, feature_cols).
-    cat_encodings and feature_cols are from train so val/test match.
+    Default time_based=True uses chronological splitting (see train_val_test_split).
+    cat_encodings and feature_cols come from train so val/test use the same codes.
     When use_pitch_result_target=True, y is per-pitch outcome (pitch_result); otherwise
     y is 5-bucket at-bat outcome when available.
     When use_immediate_outcomes_only=True, only ball/called_strike/swinging_strike/foul/foul_tip

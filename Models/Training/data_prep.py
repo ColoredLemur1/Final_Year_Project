@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote_plus
 
+import numpy as np
 import pandas as pd
 
 from dotenv import load_dotenv
@@ -264,26 +265,34 @@ def load_pitcher_simulator_data(engine) -> pd.DataFrame:
     return pitches
 
 
-def prepare_pitcher_features(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, pd.Series]]:
+def prepare_pitcher_features(
+    df: pd.DataFrame,
+    *,
+    encoders: dict | None = None,
+) -> tuple[pd.DataFrame, dict[str, pd.Series], dict | None]:
     """
-    Build (X, y_dict) for pitcher simulator: context-only features and 5 targets.
-    X excludes release_speed, release_spin_rate, plate_x, plate_z (no leakage).
+    Build X, y_dict, and optional encoder dict for the pitcher simulator (context-only features).
+
+    encoders=None on train: fits categoricals on df; return the third value and pass it into
+    val/test calls. Pass that dict as encoders on val/test; third return value is then None.
     """
     feature_cols = [c for c in _PITCHER_SIM_FEATURE_COLS if c in df.columns]
     career_cols = [c for c in _PITCHER_SIM_CAREER_COLS if c in df.columns]
     X_cols = feature_cols + career_cols
     X = df[X_cols].copy()
 
-    # Encode categoricals for pitcher simulator (same style as encode_categoricals)
-    X = _encode_pitcher_categoricals(X)
+    X, enc_out = _encode_pitcher_categoricals(X, encoders=encoders)
 
     y_dict = {t: df[t].copy() for t in _PITCHER_SIM_TARGETS}
-    return X, y_dict
+    return X, y_dict, enc_out
 
 
-def _encode_pitcher_categoricals(df: pd.DataFrame) -> pd.DataFrame:
-    """Encode categorical columns for pitcher simulator feature matrix."""
+def _encode_pitcher_categoricals(df: pd.DataFrame, encoders: dict | None = None) -> tuple[pd.DataFrame, dict | None]:
+    """Encode categorical columns; fit new encoders or apply a bundle from the training split."""
     df = df.copy()
+    fit_mode = encoders is None
+    cat_classes: dict[str, list[str]] = {} if fit_mode else encoders.get("cat_classes", {})
+
     if "game_date" in df.columns:
         start = pd.Timestamp(_SEASON_START)
         df["game_date"] = (pd.to_datetime(df["game_date"]) - start).dt.days
@@ -295,8 +304,19 @@ def _encode_pitcher_categoricals(df: pd.DataFrame) -> pd.DataFrame:
         s = df[col].fillna("__NA__").astype(str).str.strip()
         if s.str.len().eq(0).any():
             s = s.replace("", "__NA__")
-        le = LabelEncoder()
-        df[col] = le.fit_transform(s)
+        if fit_mode:
+            le = LabelEncoder()
+            df[col] = le.fit_transform(s)
+            cat_classes[col] = le.classes_.tolist()
+        else:
+            classes = cat_classes.get(col)
+            if not classes:
+                le = LabelEncoder()
+                df[col] = le.fit_transform(s)
+                continue
+            class_to_i = {c: i for i, c in enumerate(classes)}
+            unk = class_to_i.get("__NA__", 0)
+            df[col] = s.map(lambda x, m=class_to_i, u=unk: m.get(x, u)).astype(np.int64)
 
     for col in ("pitcher",):
         if col in df.columns:
@@ -307,7 +327,9 @@ def _encode_pitcher_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.select_dtypes(include=["Int64", "Int32"]).columns:
         df[col] = df[col].fillna(-1).astype("int64")
 
-    return df
+    if fit_mode:
+        return df, {"cat_classes": cat_classes}
+    return df, None
 
 
 def fit_and_save_pitcher_encoders(engine, out_path: str | Path) -> None:

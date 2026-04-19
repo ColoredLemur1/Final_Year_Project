@@ -103,6 +103,8 @@ ORDER BY game_pk, at_bat_number, pitch_number, game_date;
 -- Uses LEFT JOINs so pitches with unmapped batters are retained (with NULL Lahman fields).
 -- Required for batter pitch-result / in-play labels: events (PA outcome on last pitch),
 -- description (pitch-level result text), type (B/S/X). Populated by statcast.py loader.
+-- When loading 2023–2024, run z_statcast_multiseason.sql after this file to replace this view
+-- with a UNION across clean_statcast_pitches_2023/2024/2025.
 CREATE OR REPLACE VIEW clean_statcast_with_batter AS
 SELECT
     -- Statcast pitch data

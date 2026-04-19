@@ -46,3 +46,6 @@ CREATE INDEX IF NOT EXISTS idx_statcast_2025_pitcher ON statcast_pitches_2025 (p
 -- ALTER TABLE statcast_pitches_2025 ADD COLUMN IF NOT EXISTS plate_x REAL;
 -- ALTER TABLE statcast_pitches_2025 ADD COLUMN IF NOT EXISTS plate_z REAL;
 -- ALTER TABLE statcast_pitches_2025 ADD COLUMN IF NOT EXISTS release_spin_rate REAL;
+
+-- Multi-year (2023–2024) tables and a unified clean_statcast_with_batter view:
+-- run z_statcast_multiseason.sql after this file and clean_views.sql (see file header there).
