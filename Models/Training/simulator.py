@@ -175,7 +175,20 @@ def run(
     launch_angle = float(pred_launch[1])
     spray_angle = float(pred_launch[2]) if len(pred_launch) > 2 else 0.0
 
-    traj = compute_trajectory(launch_speed, launch_angle, spray_angle, use_drag=use_drag)
+    pitch_spin = pitch_context.get("release_spin_rate")
+    try:
+        pitch_spin_f = float(pitch_spin) if pitch_spin is not None else None
+    except (TypeError, ValueError):
+        pitch_spin_f = None
+    home = pitch_context.get("home_team")
+    traj = compute_trajectory(
+        launch_speed,
+        launch_angle,
+        spray_angle,
+        use_drag=use_drag,
+        home_team=str(home) if home is not None else None,
+        pitch_spin_rpm=pitch_spin_f,
+    )
     distance_ft = traj["distance_ft"]
     max_height_ft = traj["max_height_ft"]
     time_of_flight_s = traj["time_of_flight_s"]

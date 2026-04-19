@@ -464,7 +464,20 @@ def _resolve_hit_to_in_play(batter_models: dict, pitch: dict, context: dict) -> 
     launch_speed = float(pred_launch[0])
     launch_angle = float(pred_launch[1])
     from physics_engine import compute_trajectory
-    traj = compute_trajectory(launch_speed, launch_angle, 0.0)
+    ps = pitch.get("release_spin_rate")
+    try:
+        pitch_spin_f = float(ps) if ps is not None else None
+    except (TypeError, ValueError):
+        pitch_spin_f = None
+    ht = context.get("home_team")
+    traj = compute_trajectory(
+        launch_speed,
+        launch_angle,
+        0.0,
+        use_drag=True,
+        home_team=str(ht) if ht is not None else None,
+        pitch_spin_rpm=pitch_spin_f,
+    )
     distance_ft = traj["distance_ft"]
     hr_dist = fo_meta.get("hr_rule_distance_ft", 380)
     hr_lo = fo_meta.get("hr_rule_launch_angle_min", 20)
