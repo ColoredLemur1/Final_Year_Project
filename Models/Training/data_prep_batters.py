@@ -27,18 +27,7 @@ from temporal_split import temporal_train_val_test
 _BASE = Path(__file__).resolve().parent
 _PROJECT_ROOT = _BASE.parent.parent
 
-# ---------------------------------------------------------------------------
-# Phase 1.1: pitch_result classes (single source of truth)
-# ---------------------------------------------------------------------------
-# Game state update:
-#   ball           -> balls += 1; if balls == 4 -> walk
-#   called_strike  -> strikes += 1; if strikes == 3 -> strikeout
-#   swinging_strike-> strikes += 1; if strikes == 3 -> strikeout
-#   foul           -> strikes = min(2, strikes + 1)
-#   hit_by_pitch   -> batter to first, advance forced runners
-#   in_play_out    -> outs += 1; advance runners; if outs == 3 -> end half-inning
-#   in_play_1b/2b/3b/hr -> update bases and runs; next batter
-# ---------------------------------------------------------------------------
+# pitch_result labels (full Statcast mapping + reduced targets below)
 PITCH_RESULT_CLASSES = [
     "ball",
     "called_strike",
@@ -55,7 +44,7 @@ PITCH_RESULT_CLASSES = [
 RESULT_TO_IDX = {r: i for i, r in enumerate(PITCH_RESULT_CLASSES)}
 IDX_TO_RESULT = {i: r for i, r in enumerate(PITCH_RESULT_CLASSES)}
 
-# Immediate outcomes only (4 classes): ball, strikes, foul (foul_tip merged into foul) — no in_play_*, no hit_by_pitch
+# 4-class immediate target (no in_play / hbp; foul_tip -> foul)
 IMMEDIATE_PITCH_RESULT_CLASSES = [
     "ball",
     "called_strike",
@@ -64,8 +53,7 @@ IMMEDIATE_PITCH_RESULT_CLASSES = [
 ]
 IMMEDIATE_RESULT_TO_IDX = {r: i for i, r in enumerate(IMMEDIATE_PITCH_RESULT_CLASSES)}
 
-# 5-class immediate + hit: ball, called_strike, swinging_strike, foul, hit (successful hits only: 1b, 2b, 3b, hr)
-# in_play_out and hit_by_pitch are excluded (rows dropped) when using this target
+# 5-class immediate + hit (in_play hits -> hit; drops out/hbp)
 IMMEDIATE_PLUS_HIT_CLASSES = [
     "ball",
     "called_strike",
@@ -84,15 +72,10 @@ PITCH_RESULT_TO_IMMEDIATE_PLUS_HIT = {
     "in_play_2b": "hit",
     "in_play_3b": "hit",
     "in_play_hr": "hit",
-    # in_play_out and hit_by_pitch not included — exclude those rows when using this target
 }
 
-# ---------------------------------------------------------------------------
-# Phase 1.2: 5-bucket outcome mapping (at-bat level, from events column)
-# Tactical buckets for higher accuracy; map raw events to 5 classes.
-# ---------------------------------------------------------------------------
+# at-bat events -> 5 buckets (names in BUCKET_CLASS_NAMES)
 OUTCOME_MAPPING = {
-    # 0: In-Play Outs (Poor contact) — include all Statcast out types so at-bats are retained
     "field_out": 0,
     "ground_out": 0,
     "fly_out": 0,
@@ -107,15 +90,11 @@ OUTCOME_MAPPING = {
     "sac_bunt": 0,
     "fielders_choice": 0,
     "fielders_choice_out": 0,
-    # 1: Strikeouts (Pitcher Dominance)
     "strikeout": 1,
     "strikeout_double_play": 1,
-    # 2: Free Passes (Batter Patience)
     "walk": 2,
     "hit_by_pitch": 2,
-    # 3: Singles (Base Hits)
     "single": 3,
-    # 4: Extra Base Hits (Damage)
     "double": 4,
     "triple": 4,
     "home_run": 4,
@@ -123,7 +102,7 @@ OUTCOME_MAPPING = {
 BUCKET_CLASS_NAMES = ["in_play_out", "strikeout", "free_pass", "single", "extra_base"]
 NUM_BUCKET_CLASSES = len(BUCKET_CLASS_NAMES)
 
-# Two-stage evaluation: Stage 1 = immediate event (simulator); Stage 2 = in-play outcome (deeper viz)
+# coarse labels for sim / viz (immediate vs in_play branch)
 IMMEDIATE_EVENT_NAMES = ["ball", "strike", "foul", "hit_by_pitch", "in_play"]
 IN_PLAY_OUTCOME_NAMES = ["out", "1b", "2b", "3b", "hr"]
 PITCH_RESULT_TO_IMMEDIATE = {
@@ -147,30 +126,26 @@ PITCH_RESULT_TO_IN_PLAY_OUTCOME = {
     "in_play_hr": "hr",
 }
 
-# Deciding counts: 3-2, 0-2, 1-2, 2-2, 3-1 (used for count-aware weighting / zone nudge in pitcher sim)
+# (balls, strikes) set shared with pitcher sim for count-aware weighting
 DECIDING_COUNTS = {(0, 2), (1, 2), (2, 2), (3, 1), (3, 2)}
 
 
 def is_deciding_count(balls: int, strikes: int) -> bool:
-    """True if (balls, strikes) is a deciding count (pitcher ahead or full count)."""
     return (int(balls), int(strikes)) in DECIDING_COUNTS
 
 
-# ---------------------------------------------------------------------------
-# Phase 1.4: Batter feature columns (documented)
-# ---------------------------------------------------------------------------
-# Pitch: pitch_type, plate_x, plate_z, release_speed, release_spin_rate
-# Count: balls, strikes; optional: is_pitcher_count, is_batter_count
-# Matchup: stand, p_throws
-# Batter: batter (id), batter career: career_AB, career_H, career_HR, career_BA, career_OBP, career_SLG
-# Park: home_team (proxy when venue/park_id not in DB)
-# ---------------------------------------------------------------------------
+# core + optional + derived feature column names
 BATTER_FEATURE_COLS = [
     "pitch_type",
     "plate_x",
     "plate_z",
     "release_speed",
     "release_spin_rate",
+    # Statcast movement (pfx_* inches) + spin; spin_axis_x_pthrows = spin_axis * sign(R=+1,L=-1).
+    "hb_in",
+    "ivb_in",
+    "spin_axis",
+    "spin_axis_x_pthrows",
     "balls",
     "strikes",
     "stand",
@@ -184,14 +159,12 @@ BATTER_FEATURE_COLS = [
     "career_SLG",
     "home_team",
 ]
-# Optional: inning, outs_when_up, is_pitcher_count, is_batter_count
 BATTER_OPTIONAL_FEATURE_COLS = [
     "inning",
     "outs_when_up",
     "is_pitcher_count",
     "is_batter_count",
 ]
-# Derived / context: pitcher, previous pitch, zone, fastball, year (added in load when available)
 BATTER_EXTRA_FEATURE_COLS = [
     "pitcher",
     "previous_pitch_type",
@@ -200,14 +173,12 @@ BATTER_EXTRA_FEATURE_COLS = [
     "is_fastball",
     "game_year",
 ]
-# Sequence: multiple lags of (pitch_type, was_strike) for "previous balls" context (last 2–3 pitches)
 BATTER_SEQUENCE_FEATURE_COLS = [
     "previous_2_pitch_type",
     "previous_2_was_strike",
     "previous_3_pitch_type",
     "previous_3_was_strike",
 ]
-# Fastball pitch types for is_fastball flag
 FASTBALL_TYPES = {"FF", "FT", "FC", "SI", "FS"}
 
 
@@ -226,12 +197,7 @@ def _db_url() -> str:
     return f"postgresql://{user}:{pw}@{host}:{port}/{dbname}"
 
 
-# ---------------------------------------------------------------------------
-# Phase 1.3: Mapping raw event/description/type -> pitch_result
-# ---------------------------------------------------------------------------
-# Statcast: description = pitch-level; events = PA-level (on last pitch of AB);
-# type = 'B' | 'S' | 'X' (ball, strike, in play).
-# ---------------------------------------------------------------------------
+# Statcast description / type / PA events -> pitch_result
 DESCRIPTION_TO_RESULT = {
     "ball": "ball",
     "blocked_ball": "ball",
@@ -245,9 +211,9 @@ DESCRIPTION_TO_RESULT = {
     "foul_bunt": "foul",
     "missed_bunt": "swinging_strike",
     "hit_by_pitch": "hit_by_pitch",
-    "hit_into_play": None,  # use events
-    "hit_into_play_no_out": None,  # use events
-    "hit_into_play_score": None,  # use events
+    "hit_into_play": None,
+    "hit_into_play_no_out": None,
+    "hit_into_play_score": None,
 }
 EVENTS_TO_IN_PLAY_RESULT = {
     "single": "in_play_1b",
@@ -270,7 +236,7 @@ EVENTS_TO_IN_PLAY_RESULT = {
 
 
 def _safe_str(x) -> str:
-    """Coerce value to string; treat None/NaN as empty so we don't lose in-play (type X)."""
+    """String for DB fields; empty if null so type X still parses."""
     if x is None:
         return ""
     if isinstance(x, float) and np.isnan(x):
@@ -283,39 +249,30 @@ def events_description_to_pitch_result(
     description: str | None,
     type_val: str | None,
 ) -> str | None:
-    """
-    Map raw Statcast event/description/type to pitch_result class.
-    Returns one of PITCH_RESULT_CLASSES or None (drop row).
-    Uses _safe_str so NaN from DB (NULL) is treated as empty and type 'X' is still recognized.
-    """
+    """Map Statcast row to a PITCH_RESULT_CLASSES label or None."""
     desc = _safe_str(description).lower()
     typ = _safe_str(type_val).upper()
     ev = _safe_str(events).lower()
 
-    # In play: use events (populated on the pitch that ends the AB)
     if typ == "X" or "hit_into_play" in desc or "hit_into_play_no_out" in desc or "hit_into_play_score" in desc:
         if ev and ev in EVENTS_TO_IN_PLAY_RESULT:
             return EVENTS_TO_IN_PLAY_RESULT[ev]
-        # fallback: generic out
         if typ == "X":
             return "in_play_out"
         return None
 
-    # Non–in-play: use description
     if desc in DESCRIPTION_TO_RESULT:
         res = DESCRIPTION_TO_RESULT[desc]
         if res is not None:
             return res
-    # Fallback by type
     if typ == "B":
         return "ball"
     if typ == "S":
-        return "called_strike"  # generic strike if description missing
+        return "called_strike"
     return None
 
 
 def event_to_pitch_result(row: pd.Series) -> str | None:
-    """Convenience: map a row (events, description, type) to pitch_result."""
     return events_description_to_pitch_result(
         row.get("events"),
         row.get("description"),
@@ -323,17 +280,35 @@ def event_to_pitch_result(row: pd.Series) -> str | None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Phase 2: Loaders and prep
-# ---------------------------------------------------------------------------
+def _p_throws_sign(s: pd.Series) -> np.ndarray:
+    u = s.astype(str).str.upper().str.strip().str[0]
+    return np.where(u == "R", 1.0, np.where(u == "L", -1.0, 0.0))
+
+
+def add_batter_movement_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    HB / IVB proxies from Statcast pfx_x / pfx_z (inches); spin_axis (deg) and handedness interaction.
+    Missing values -> -1.0 for model sentinel consistency.
+    """
+    df = df.copy()
+    px = pd.to_numeric(df.get("pfx_x"), errors="coerce")
+    pz = pd.to_numeric(df.get("pfx_z"), errors="coerce")
+    df["hb_in"] = px
+    df["ivb_in"] = pz
+    sa = pd.to_numeric(df.get("spin_axis"), errors="coerce")
+    df["spin_axis"] = sa
+    sig = _p_throws_sign(df["p_throws"])
+    cross = sa * sig
+    invalid = sa.isna() | (sig == 0)
+    cross = cross.mask(invalid, np.nan)
+    df["spin_axis_x_pthrows"] = cross
+    for c in ("hb_in", "ivb_in", "spin_axis", "spin_axis_x_pthrows"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(-1.0)
+    return df
+
+
 def load_batter_simulator_data(engine) -> pd.DataFrame:
-    """
-    Load pitch-level rows: pitch + context + events for mapping.
-    Uses clean_statcast_with_batter; adds is_pitcher_count, is_batter_count.
-    Drops rows with null required cols; excludes KN; applies pitch_result mapping.
-    """
-    # Base columns; zone, at_bat_number, pitch_number may be missing in older views.
-    # Quote "type" (PostgreSQL reserved word) so the column is selected correctly.
+    """Load regular-season pitches from clean_statcast_with_batter; add lags, pitch_result, target_class."""
     q = """
     SELECT
         game_date, game_year, game_pk, game_type,
@@ -345,8 +320,7 @@ def load_batter_simulator_data(engine) -> pd.DataFrame:
     FROM clean_statcast_with_batter
     WHERE game_type = 'R'
     """
-    try:
-        q_extra = """
+    q_extra = """
         SELECT
             game_date, game_year, game_pk, game_type,
             batter, pitcher, events, description, "type",
@@ -358,22 +332,43 @@ def load_batter_simulator_data(engine) -> pd.DataFrame:
         FROM clean_statcast_with_batter
         WHERE game_type = 'R'
         """
-        df = pd.read_sql(q_extra, engine)
-    except Exception:
+    q_movement = """
+        SELECT
+            game_date, game_year, game_pk, game_type,
+            batter, pitcher, events, description, "type",
+            pitch_type, plate_x, plate_z, release_speed, release_spin_rate,
+            pfx_x, pfx_z, spin_axis,
+            balls, strikes, stand, p_throws,
+            home_team, away_team, inning, outs_when_up,
+            zone, at_bat_number, pitch_number,
+            career_AB, career_H, career_HR, career_BA, career_OBP, career_SLG
+        FROM clean_statcast_with_batter
+        WHERE game_type = 'R'
+        """
+    df = None
+    for q_try in (q_movement, q_extra, q):
+        try:
+            df = pd.read_sql(q_try, engine)
+            break
+        except Exception:
+            continue
+    if df is None or len(df.columns) == 0:
         df = pd.read_sql(q, engine)
+    if "pfx_x" not in df.columns:
+        df["pfx_x"] = np.nan
+        df["pfx_z"] = np.nan
+        df["spin_axis"] = np.nan
+    if "zone" not in df.columns:
         df["zone"] = np.nan
         df["at_bat_number"] = 0
         df["pitch_number"] = 0
 
-    # Normalize events/description/type column names (some DB drivers return Type, Events, Description)
     for alt, canonical in [("Type", "type"), ("Events", "events"), ("Description", "description")]:
         if alt in df.columns and canonical not in df.columns:
             df[canonical] = df[alt]
         elif alt in df.columns and canonical in df.columns:
             df[canonical] = df[canonical].fillna(df[alt])
 
-    # Normalize career column names (PostgreSQL often returns lowercase) and add if missing.
-    # If your view has no career stats, run baseball_data/sql/views.sql and clean_views.sql.
     career_cols = ["career_AB", "career_H", "career_HR", "career_BA", "career_OBP", "career_SLG"]
     for c in career_cols:
         if c in df.columns:
@@ -383,22 +378,18 @@ def load_batter_simulator_data(engine) -> pd.DataFrame:
             df[c] = df[low]
         else:
             df[c] = -1.0
-    # Fill NULL career stats (e.g. batters with no Lahman mapping) so we don't drop in-play rows in dropna(required)
     for c in career_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(-1.0)
 
-    # Derived count flags
     b = df["balls"].fillna(0).astype(int)
     s = df["strikes"].fillna(0).astype(int)
     df["is_pitcher_count"] = ((b == 0) & (s >= 2)) | ((b == 1) & (s == 2)).astype(int)
     df["is_batter_count"] = ((b >= 3) & (s <= 1)) | ((b == 2) & (s == 0)).astype(int)
 
-    # Pitcher: already in SELECT; ensure column exists for older views
     if "pitcher" not in df.columns:
         df["pitcher"] = -1
 
-    # Previous pitch(es) in PA: lag 1 and optional lags 2–3 for sequence context
     if all(k in df.columns for k in ["game_pk", "at_bat_number", "pitch_number"]):
         df = df.sort_values(["game_pk", "at_bat_number", "pitch_number"]).reset_index(drop=True)
         g = df.groupby(["game_pk", "at_bat_number"])
@@ -416,23 +407,21 @@ def load_batter_simulator_data(engine) -> pd.DataFrame:
         df["previous_3_pitch_type"] = "__NA__"
         df["previous_3_was_strike"] = 0
 
-    # In zone (Statcast zone 1-9 is strike zone)
     if "zone" in df.columns:
         z = pd.to_numeric(df["zone"], errors="coerce")
         df["in_zone"] = np.where(z.notna() & (z >= 1) & (z <= 9), 1, np.where(z.notna(), 0, -1))
     else:
         df["in_zone"] = -1
 
-    # Is fastball (FF, FT, FC, SI, FS)
     df["is_fastball"] = df["pitch_type"].astype(str).str.upper().isin(FASTBALL_TYPES).astype(int)
 
-    # Game year (run environment); normalize if missing
+    df = add_batter_movement_features(df)
+
     if "game_year" not in df.columns:
         df["game_year"] = -1
     else:
         df["game_year"] = pd.to_numeric(df["game_year"], errors="coerce").fillna(-1).astype(int)
 
-    # Required pitch/context columns (career_* already ensured above)
     required = [
         "pitch_type", "plate_x", "plate_z", "release_speed", "release_spin_rate",
         "balls", "strikes", "stand", "p_throws", "batter",
@@ -445,9 +434,7 @@ def load_batter_simulator_data(engine) -> pd.DataFrame:
     df = df.dropna(subset=required)
     df = df.loc[df["pitch_type"] != "KN"].copy()
 
-    # Map to pitch_result (Phase 2.4)
     df["pitch_result"] = df.apply(event_to_pitch_result, axis=1)
-    # Diagnostic: if no in-play outcomes, type/events/description may be missing or wrong in DB
     if "type" in df.columns:
         n_type_x = (df["type"].apply(lambda x: _safe_str(x).upper() == "X")).sum()
     else:
@@ -467,9 +454,7 @@ def load_batter_simulator_data(engine) -> pd.DataFrame:
         )
     df = df.loc[df["pitch_result"].notna()].copy()
 
-    # 5-bucket target: at-bat outcome from events (populated on last pitch of AB)
     if "game_pk" in df.columns and "at_bat_number" in df.columns and "events" in df.columns:
-        # Per at-bat: get events from the row where events is not null (last pitch of AB)
         ab_events = (
             df.loc[df["events"].notna()]
             .groupby(["game_pk", "at_bat_number"], as_index=False)["events"]
@@ -496,10 +481,7 @@ def load_batter_simulator_data(engine) -> pd.DataFrame:
 
 
 def _encode_batter_categoricals(df: pd.DataFrame, cat_encodings: dict | None = None) -> tuple[pd.DataFrame, dict]:
-    """
-    Encode categorical columns for batter features. If cat_encodings provided, use it; else fit.
-    Returns (encoded_df, cat_encodings).
-    """
+    """Label-encode categoricals; fit encodings if cat_encodings is None."""
     df = df.copy()
     feats = [c for c in BATTER_FEATURE_COLS if c in df.columns]
     opt = [c for c in BATTER_OPTIONAL_FEATURE_COLS if c in df.columns]
@@ -528,7 +510,16 @@ def _encode_batter_categoricals(df: pd.DataFrame, cat_encodings: dict | None = N
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(-1.0)
         elif col in ("balls", "strikes", "inning", "outs_when_up", "is_pitcher_count", "is_batter_count"):
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype("int64")
-        elif col in ("plate_x", "plate_z", "release_speed", "release_spin_rate"):
+        elif col in (
+            "plate_x",
+            "plate_z",
+            "release_speed",
+            "release_spin_rate",
+            "hb_in",
+            "ivb_in",
+            "spin_axis",
+            "spin_axis_x_pthrows",
+        ):
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(-1.0)
 
     return df, cat_encodings
@@ -542,19 +533,7 @@ def prepare_batter_features(
     use_immediate_outcomes_only: bool = False,
     use_immediate_plus_hit: bool = False,
 ) -> tuple[pd.DataFrame, pd.Series, dict]:
-    """
-    Build (X, y, cat_encodings) for batter simulator.
-    X = batter feature matrix; y = pitch_result (or target_class); cat_encodings for inference.
-    If feature_cols is provided (e.g. from train), val/test use same columns (missing filled -1).
-    When use_pitch_result_target=True, y is always pitch_result (per-pitch outcome); otherwise
-    y is 5-bucket target_class (only rows with mapped at-bat outcome are kept).
-    When use_immediate_outcomes_only=True (and use_pitch_result_target=True), only rows with
-    pitch_result in {ball, called_strike, swinging_strike, foul, foul_tip} are kept; foul_tip
-    is mapped to foul so the target has 4 classes — no in_play_*, no hit_by_pitch.
-    When use_immediate_plus_hit=True (and use_pitch_result_target=True), keep ball/called_strike/
-    swinging_strike/foul/foul_tip and all in_play_*; map to 5 classes: ball, called_strike,
-    swinging_strike, foul, hit. hit_by_pitch rows are excluded.
-    """
+    """Build X, y, cat_encodings. y is pitch_result or target_class; optional immediate-only / +hit filters."""
     df = df.copy()
     if use_immediate_plus_hit and use_pitch_result_target:
         allowed = list(PITCH_RESULT_TO_IMMEDIATE_PLUS_HIT.keys())
@@ -571,7 +550,6 @@ def prepare_batter_features(
         opt = [c for c in BATTER_OPTIONAL_FEATURE_COLS if c in df.columns]
         extra = [c for c in BATTER_EXTRA_FEATURE_COLS + BATTER_SEQUENCE_FEATURE_COLS if c in df.columns]
         feature_cols = feats + opt + extra
-    # Ensure all columns exist for consistent matrix
     int_fill_cols = ("batter", "pitcher", "balls", "strikes", "inning", "outs_when_up", "is_pitcher_count", "is_batter_count", "previous_was_strike", "previous_2_was_strike", "previous_3_was_strike", "in_zone", "is_fastball", "game_year")
     na_pitch_type_cols = ("previous_pitch_type", "previous_2_pitch_type", "previous_3_pitch_type")
     X = pd.DataFrame(index=df.index)
@@ -581,7 +559,6 @@ def prepare_batter_features(
         else:
             X[c] = "__NA__" if c in na_pitch_type_cols else (-1 if c in int_fill_cols else -1.0)
     X, cat_encodings = _encode_batter_categoricals(X, cat_encodings)
-    # Per-pitch target (pitch_result or immediate-only 5 classes) vs at-bat target (5-bucket target_class)
     if use_pitch_result_target:
         y = df["pitch_result"].copy()
     elif "target_class" in df.columns:
@@ -600,15 +577,7 @@ def train_val_test_split(
     date_col: str = "game_date",
     year_col: str = "game_year",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Split into train/val/test.
-
-    time_based=True (default): chronological split via temporal_train_val_test (by season when
-    multiple years exist, else by game_date order).
-
-    time_based=False: random stratified split on target_class if present, else pitch_result.
-    Returns (train_df, val_df, test_df).
-    """
+    """Train/val/test: temporal_train_val_test if time_based else stratified random split."""
     n = len(df)
     stratify_col = df["target_class"] if "target_class" in df.columns and df["target_class"].notna().all() else df.get("pitch_result")
     if time_based and (date_col in df.columns or year_col in df.columns):
@@ -644,18 +613,7 @@ def load_and_prepare_batter(
     use_immediate_outcomes_only: bool = False,
     use_immediate_plus_hit: bool = False,
 ) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, dict, list]:
-    """
-    Load batter data, build pitch_result, split, prepare features.
-    Returns (X_train, y_train, X_val, y_val, X_test, y_test, cat_encodings, feature_cols).
-    Default time_based=True uses chronological splitting (see train_val_test_split).
-    cat_encodings and feature_cols come from train so val/test use the same codes.
-    When use_pitch_result_target=True, y is per-pitch outcome (pitch_result); otherwise
-    y is 5-bucket at-bat outcome when available.
-    When use_immediate_outcomes_only=True, only ball/called_strike/swinging_strike/foul/foul_tip
-    are kept (no in_play_*, no hit_by_pitch).
-    When use_immediate_plus_hit=True, 5 classes: ball, called_strike, swinging_strike, foul, hit
-    (all in_play_* mapped to hit; hit_by_pitch excluded).
-    """
+    """Load, split, prepare; returns X/y splits, encodings from train, feature_cols."""
     df = load_batter_simulator_data(engine)
     train_df, val_df, test_df = train_val_test_split(
         df, train_frac=train_frac, val_frac=val_frac, random_state=random_state, time_based=time_based
@@ -680,13 +638,7 @@ def load_and_prepare_batter(
 
 
 def encode_batter_row(pitch: dict, context: dict, encoders: dict) -> pd.DataFrame:
-    """
-    Encode one pitch + context for batter model inference.
-    pitch: {pitch_type, plate_x, plate_z, release_speed, release_spin_rate}
-    context: {balls, strikes, stand, p_throws, batter, career_AB, career_H, ...}, home_team
-    encoders: from load_batter_encoders (feats_batter, cat_encodings).
-    Returns one-row DataFrame with feats_batter columns.
-    """
+    """One-row feature frame for inference (feats_batter + cat_encodings from JSON)."""
     feats = encoders.get("feats_batter", BATTER_FEATURE_COLS)
     cat_encodings = encoders.get("cat_encodings", {})
     out = {}
@@ -709,6 +661,43 @@ def encode_batter_row(pitch: dict, context: dict, encoders: dict) -> pd.DataFram
             out[col] = int(context.get(col, -1) if context.get(col) is not None else -1)
         elif col in ("plate_x", "plate_z", "release_speed", "release_spin_rate"):
             out[col] = float(pitch.get(col, -1) or -1)
+        elif col in ("hb_in", "ivb_in"):
+            raw = pitch.get(col)
+            if raw is None or raw == "":
+                alt = "pfx_x" if col == "hb_in" else "pfx_z"
+                raw = pitch.get(alt, -1)
+            try:
+                out[col] = float(raw)
+            except (TypeError, ValueError):
+                out[col] = -1.0
+            if out[col] != out[col]:  # NaN
+                out[col] = -1.0
+        elif col == "spin_axis":
+            raw = pitch.get("spin_axis", pitch.get("spin_axis_deg", -1))
+            try:
+                v = float(raw)
+            except (TypeError, ValueError):
+                v = -1.0
+            out[col] = v if v == v else -1.0
+        elif col == "spin_axis_x_pthrows":
+            if pitch.get("spin_axis_x_pthrows") is not None:
+                try:
+                    out[col] = float(pitch["spin_axis_x_pthrows"])
+                except (TypeError, ValueError):
+                    out[col] = -1.0
+            else:
+                try:
+                    sa = float(pitch.get("spin_axis", -1))
+                except (TypeError, ValueError):
+                    sa = -1.0
+                if sa < 0 or sa > 360 or sa != sa:
+                    out[col] = -1.0
+                else:
+                    pt = str(context.get("p_throws", "R")).upper().strip()[:1]
+                    sig = 1.0 if pt == "R" else (-1.0 if pt == "L" else 0.0)
+                    out[col] = sa * sig if sig else -1.0
+            if out[col] != out[col]:
+                out[col] = -1.0
         elif col in ("balls", "strikes"):
             out[col] = int(context.get(col, 0) or 0)
         elif col in ("career_AB", "career_H", "career_HR", "career_BA", "career_OBP", "career_SLG"):
@@ -719,7 +708,7 @@ def encode_batter_row(pitch: dict, context: dict, encoders: dict) -> pd.DataFram
 
 
 def load_batter_encoders(path: str | Path) -> dict | None:
-    """Load batter encoders from JSON (feats_batter, result_to_idx, cat_encodings). Returns None if missing."""
+    """Load batter_encoders.json or None."""
     path = Path(path)
     if not path.exists():
         return None

@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS statcast_pitches_2023 (
     pitch_number    SMALLINT,
     plate_x         REAL,
     plate_z         REAL,
-    release_spin_rate REAL
+    release_spin_rate REAL,
+    pfx_x           REAL,
+    pfx_z           REAL,
+    spin_axis       REAL
 );
 
 CREATE TABLE IF NOT EXISTS statcast_pitches_2024 (
@@ -70,7 +73,10 @@ CREATE TABLE IF NOT EXISTS statcast_pitches_2024 (
     pitch_number    SMALLINT,
     plate_x         REAL,
     plate_z         REAL,
-    release_spin_rate REAL
+    release_spin_rate REAL,
+    pfx_x           REAL,
+    pfx_z           REAL,
+    spin_axis       REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_statcast_2023_game ON statcast_pitches_2023 (game_date, game_pk);
@@ -88,6 +94,13 @@ ALTER TABLE statcast_pitches_2023 ADD COLUMN IF NOT EXISTS release_spin_rate REA
 ALTER TABLE statcast_pitches_2024 ADD COLUMN IF NOT EXISTS plate_x REAL;
 ALTER TABLE statcast_pitches_2024 ADD COLUMN IF NOT EXISTS plate_z REAL;
 ALTER TABLE statcast_pitches_2024 ADD COLUMN IF NOT EXISTS release_spin_rate REAL;
+
+ALTER TABLE statcast_pitches_2023 ADD COLUMN IF NOT EXISTS pfx_x REAL;
+ALTER TABLE statcast_pitches_2023 ADD COLUMN IF NOT EXISTS pfx_z REAL;
+ALTER TABLE statcast_pitches_2023 ADD COLUMN IF NOT EXISTS spin_axis REAL;
+ALTER TABLE statcast_pitches_2024 ADD COLUMN IF NOT EXISTS pfx_x REAL;
+ALTER TABLE statcast_pitches_2024 ADD COLUMN IF NOT EXISTS pfx_z REAL;
+ALTER TABLE statcast_pitches_2024 ADD COLUMN IF NOT EXISTS spin_axis REAL;
 
 -- ---------------------------------------------------------------------------
 -- Dedup clean pitch views (mirror clean_statcast_pitches_2025)
@@ -124,7 +137,10 @@ SELECT DISTINCT ON (game_pk, at_bat_number, pitch_number)
     pitch_number,
     plate_x,
     plate_z,
-    release_spin_rate
+    release_spin_rate,
+    pfx_x,
+    pfx_z,
+    spin_axis
 FROM statcast_pitches_2023
 ORDER BY game_pk, at_bat_number, pitch_number, game_date;
 
@@ -160,7 +176,10 @@ SELECT DISTINCT ON (game_pk, at_bat_number, pitch_number)
     pitch_number,
     plate_x,
     plate_z,
-    release_spin_rate
+    release_spin_rate,
+    pfx_x,
+    pfx_z,
+    spin_axis
 FROM statcast_pitches_2024
 ORDER BY game_pk, at_bat_number, pitch_number, game_date;
 
@@ -200,6 +219,9 @@ SELECT
     s.plate_x,
     s.plate_z,
     s.release_spin_rate,
+    s.pfx_x,
+    s.pfx_z,
+    s.spin_axis,
     p.nameFirst   AS batter_name_first,
     p.nameLast    AS batter_name_last,
     p.birthYear   AS batter_birth_year,

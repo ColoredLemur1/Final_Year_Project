@@ -181,12 +181,17 @@ def predict_pitch(models: dict, context: dict) -> dict:
     release_spin_rate = float(reg["release_spin_rate"].predict(X_s2[feats_reg])[0])
     release_spin_rate += residual_stds.get("release_spin_rate", {}).get(pitch_type, default_stds["release_spin_rate"]) * np.random.randn()
 
+    # Batter model movement / spin: pitcher pipeline does not regress these yet; use -1 sentinel (same as training fallbacks).
     return {
         "pitch_type": pitch_type,
         "plate_x": plate_x,
         "plate_z": plate_z,
         "release_speed": release_speed,
         "release_spin_rate": release_spin_rate,
+        "hb_in": -1.0,
+        "ivb_in": -1.0,
+        "spin_axis": -1.0,
+        "spin_axis_x_pthrows": -1.0,
     }
 
 
@@ -242,7 +247,17 @@ def load_real_pitcher_pitches_with_context(engine, pitcher_id: int) -> pd.DataFr
     Use with generate_pitches_from_real_contexts so the model sees the same situations as real data."""
     from sqlalchemy import text
 
-    q = text("""
+    q_move = text("""
+    SELECT
+        game_pk, pitcher, p_throws, stand, balls, strikes, inning, inning_topbot, outs_when_up,
+        at_bat_number, pitch_number, game_date, home_team, away_team, game_type,
+        pitch_type, plate_x, plate_z, release_speed, release_spin_rate,
+        pfx_x, pfx_z, spin_axis
+    FROM clean_statcast_with_batter
+    WHERE pitcher = :pid AND game_type = 'R'
+    ORDER BY game_pk, at_bat_number, pitch_number
+    """)
+    q_base = text("""
     SELECT
         game_pk, pitcher, p_throws, stand, balls, strikes, inning, inning_topbot, outs_when_up,
         at_bat_number, pitch_number, game_date, home_team, away_team, game_type,
@@ -251,7 +266,13 @@ def load_real_pitcher_pitches_with_context(engine, pitcher_id: int) -> pd.DataFr
     WHERE pitcher = :pid AND game_type = 'R'
     ORDER BY game_pk, at_bat_number, pitch_number
     """)
-    df = pd.read_sql(q, engine, params={"pid": pitcher_id})
+    try:
+        df = pd.read_sql(q_move, engine, params={"pid": pitcher_id})
+    except Exception:
+        df = pd.read_sql(q_base, engine, params={"pid": pitcher_id})
+        for c in ("pfx_x", "pfx_z", "spin_axis"):
+            if c not in df.columns:
+                df[c] = np.nan
     if len(df) == 0:
         return df
     # Previous pitch within same at-bat
@@ -355,9 +376,7 @@ def get_engine():
     return create_engine(_db_url())
 
 
-# ---------------------------------------------------------------------------
-# Batter model and game sim (Phase 5)
-# ---------------------------------------------------------------------------
+# Batter model and game simulation helpers
 def load_batter_models() -> dict:
     """Load batter pitch_result classifier and encoders. Prefer calibrated model (same as evaluation)."""
     sys.path.insert(0, str(_PROJECT_ROOT / "Models" / "Training"))

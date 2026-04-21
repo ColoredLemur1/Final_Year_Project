@@ -35,6 +35,10 @@ COLS = [
     "at_bat_number", "pitch_number",
     "plate_x", "plate_z",
     "release_spin_rate",
+    # Movement / spin (Statcast): pfx_x / pfx_z in inches; spin_axis in degrees (clock from catcher view).
+    "pfx_x",
+    "pfx_z",
+    "spin_axis",
 ]
 
 

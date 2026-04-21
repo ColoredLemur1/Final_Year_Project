@@ -195,9 +195,7 @@ def _load_pitcher_pitch_insights(_engine, pitcher_id: int) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Normalization helpers
-# ---------------------------------------------------------------------------
 
 def _minmax(series: pd.Series, val: float, invert: bool = False) -> float:
     """Normalize val against series min/max; optionally invert (lower=better stats)."""
