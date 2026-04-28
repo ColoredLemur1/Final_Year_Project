@@ -309,3 +309,134 @@ def compute_trajectory(
         "vy": vy0,
         "vz": vz0,
     }
+
+
+def sample_trajectory_path(
+    launch_speed_mph: float,
+    launch_angle_deg: float,
+    spray_angle_deg: float,
+    *,
+    use_drag: bool = False,
+    use_magnus: bool = True,
+    dt: float = 0.005,
+    spin_rate_rpm: float | None = None,
+    pitch_spin_rpm: float | None = None,
+    altitude_ft: float | None = None,
+    home_team: str | None = None,
+    n_vacuum_samples: int = 400,
+) -> dict[str, Any]:
+    """
+    Sample (ground distance, height) along the trajectory for plotting.
+
+    Vacuum: closed-form parabola in time. Drag paths: same explicit Euler
+    integrator as compute_trajectory (Section methodology: drag + optional Magnus).
+
+    Returns dict with keys time_s, ground_distance_ft, height_ft, plus vx0, vy0, vz0
+    and summary fields max_height_ft, time_of_flight_s, distance_ft for the path taken.
+    """
+    v0_fps = float(launch_speed_mph) * MPH_TO_FPS
+    theta = float(launch_angle_deg) * DEG_TO_RAD
+    phi = float(spray_angle_deg) * DEG_TO_RAD
+
+    vx0 = v0_fps * math.cos(theta) * math.sin(phi)
+    vy0 = v0_fps * math.cos(theta) * math.cos(phi)
+    vz0 = v0_fps * math.sin(theta)
+
+    if not use_drag:
+        if vz0 <= 0.0:
+            return {
+                "time_s": [0.0],
+                "ground_distance_ft": [0.0],
+                "height_ft": [0.0],
+                "vx": vx0,
+                "vy": vy0,
+                "vz": vz0,
+                "max_height_ft": 0.0,
+                "time_of_flight_s": 0.0,
+                "distance_ft": 0.0,
+            }
+        t_flight = 2.0 * vz0 / G
+        n = max(2, int(n_vacuum_samples))
+        time_s: list[float] = []
+        ground_distance_ft: list[float] = []
+        height_ft: list[float] = []
+        for i in range(n):
+            t = t_flight * (i / (n - 1)) if n > 1 else 0.0
+            time_s.append(t)
+            ground_distance_ft.append(math.hypot(vx0 * t, vy0 * t))
+            height_ft.append(vz0 * t - 0.5 * G * t * t)
+        h_max = (vz0 * vz0) / (2.0 * G)
+        dist = math.hypot(vx0 * t_flight, vy0 * t_flight)
+        return {
+            "time_s": time_s,
+            "ground_distance_ft": ground_distance_ft,
+            "height_ft": height_ft,
+            "vx": vx0,
+            "vy": vy0,
+            "vz": vz0,
+            "max_height_ft": h_max,
+            "time_of_flight_s": t_flight,
+            "distance_ft": dist,
+        }
+
+    alt = float(altitude_ft) if altitude_ft is not None else stadium_elevation_ft(home_team)
+    rho = RHO_SLUG_FT3 * air_density_ratio(alt)
+    spin = (
+        float(spin_rate_rpm)
+        if spin_rate_rpm is not None and math.isfinite(spin_rate_rpm) and spin_rate_rpm > 0
+        else _effective_spin_rpm(launch_speed_mph, launch_angle_deg, pitch_spin_rpm)
+    )
+
+    time_s = [0.0]
+    ground_distance_ft = [0.0]
+    height_ft = [0.0]
+
+    x, y, z = 0.0, 0.0, 0.0
+    xp, yp, zp = 0.0, 0.0, 0.0
+    vx_i, vy_i, vz_i = vx0, vy0, vz0
+    h_max = 0.0
+    t = 0.0
+
+    while (z >= 0.0 or t == 0.0) and t < 40.0:
+        xp, yp, zp = x, y, z
+        ddx, ddy, ddz = _drag_acceleration_ft_s2(vx_i, vy_i, vz_i, rho)
+        mx, my, mz = _magnus_acceleration_ft_s2(vx_i, vy_i, vz_i, spin, rho, use_magnus)
+        ax = ddx + mx
+        ay = ddy + my
+        az = ddz + mz - G
+        vx_i += ax * dt
+        vy_i += ay * dt
+        vz_i += az * dt
+        x += vx_i * dt
+        y += vy_i * dt
+        z += vz_i * dt
+        t += dt
+        if z > h_max:
+            h_max = z
+        time_s.append(t)
+        ground_distance_ft.append(math.hypot(x, y))
+        height_ft.append(z)
+        if z < 0.0 and zp >= 0.0 and t > dt:
+            frac = zp / (zp - z + 1e-12)
+            frac = max(0.0, min(1.0, frac))
+            x = xp + frac * (x - xp)
+            y = yp + frac * (y - yp)
+            z = 0.0
+            t = t - dt + frac * dt
+            time_s[-1] = t
+            ground_distance_ft[-1] = math.hypot(x, y)
+            height_ft[-1] = 0.0
+            break
+
+    distance_ft = math.hypot(x, y)
+    return {
+        "time_s": time_s,
+        "ground_distance_ft": ground_distance_ft,
+        "height_ft": height_ft,
+        "vx": vx0,
+        "vy": vy0,
+        "vz": vz0,
+        "max_height_ft": h_max,
+        "time_of_flight_s": t,
+        "distance_ft": distance_ft,
+    }

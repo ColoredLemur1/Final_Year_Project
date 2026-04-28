@@ -729,7 +729,12 @@ def simulate_half_inning(
     order_index = 0
     while state["outs"] < 3:
         batter_id, batter_career = batting_order[order_index % len(batting_order)]
-        context = {**pitcher_context, "balls": state["balls"], "strikes": state["strikes"]}
+        context = {
+            **pitcher_context,
+            "balls": state["balls"],
+            "strikes": state["strikes"],
+            "stand": batter_career.get("stand") or pitcher_context.get("stand") or "R",
+        }
         last_pitch: dict | None = None
         last_result: str | None = None
         pitch_history: list[tuple[str, int]] = []  # (pitch_type, was_strike) oldest to newest, max 3

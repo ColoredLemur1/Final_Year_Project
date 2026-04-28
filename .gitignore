@@ -11,3 +11,5 @@ Models/saved_models/*
 Models/Training/saved_models/*
 # Local report drafts (not for version control)
 report/
+# Metrics: ignore entire directory (scripts, notebooks, outputs, caches)
+metrics/
